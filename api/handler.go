@@ -11,7 +11,7 @@ import (
 
 func Router(newSnek func() Snek) http.Handler {
 	r := chi.NewRouter()
-	h := &handler{newSnek: newSnek}
+	h := &handler{newSnek: newSnek, gameSneks: map[string]Snek{}}
 	r.Get("/", h.Info)
 	r.Post("/start", h.Start)
 	r.Post("/move", h.Move)
@@ -44,12 +44,9 @@ func (h *handler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	gameSnek := h.newSnek()
 	h.mu.Lock()
-	gameSnek, ok := h.gameSneks[startReq.Game.ID]
-	if !ok {
-		gameSnek = h.newSnek()
-		h.gameSneks[startReq.Game.ID] = gameSnek
-	}
+	h.gameSneks[startReq.Game.ID+startReq.You.ID] = gameSnek
 	h.mu.Unlock()
 
 	err = gameSnek.Start(&State{
@@ -76,7 +73,7 @@ func (h *handler) Move(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.mu.RLock()
-	gameSnek, ok := h.gameSneks[moveReq.Game.ID]
+	gameSnek, ok := h.gameSneks[moveReq.Game.ID+moveReq.You.ID]
 	h.mu.RUnlock()
 	if !ok {
 		http.Error(w, "game not started", http.StatusBadRequest)
@@ -113,9 +110,10 @@ func (h *handler) End(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.RLock()
-	gameSnek, ok := h.gameSneks[endReq.Game.ID]
-	h.mu.RUnlock()
+	h.mu.Lock()
+	gameSnek, ok := h.gameSneks[endReq.Game.ID+endReq.You.ID]
+	delete(h.gameSneks, endReq.Game.ID+endReq.You.ID)
+	h.mu.Unlock()
 	if !ok {
 		http.Error(w, "game not started", http.StatusBadRequest)
 		return
@@ -132,6 +130,5 @@ func (h *handler) End(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: write final game state
 	w.WriteHeader(http.StatusOK)
 }

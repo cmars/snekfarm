@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 
@@ -48,6 +49,7 @@ func (s *snek) Move(st *api.State) (string, string, error) {
 	s.previousStates = append(s.previousStates, s.currentState)
 	s.currentState = st
 
+	log.Printf("%#v", s.currentState)
 	direction := s.direction()
 	return direction, "", nil
 }
@@ -55,8 +57,12 @@ func (s *snek) Move(st *api.State) (string, string, error) {
 func (s *snek) direction() string {
 	// Where can I go?
 	directions := s.affordances()
+	if len(directions) == 0 {
+		return ""
+	}
 	// Decide on a direction
 	i := rand.Intn(len(directions))
+	log.Printf("affordances: %#v choose: %v", directions, directions[i])
 	return directions[i]
 }
 
@@ -65,84 +71,69 @@ func (s *snek) affordances() []string {
 	blocked := map[string]bool{}
 	// Check if walls are blocking some moves
 	if head.X == 0 {
+		log.Printf("avoid left wall")
 		blocked["left"] = true
 	}
-	if head.X == s.currentState.Board.Width {
+	if head.X == s.currentState.Board.Width-1 {
+		log.Printf("avoid right wall")
 		blocked["right"] = true
 	}
 	if head.Y == 0 {
+		log.Printf("avoid bottom wall")
 		blocked["down"] = true
 	}
-	if head.Y == s.currentState.Board.Height {
+	if head.Y == s.currentState.Board.Height-1 {
+		log.Printf("avoid top wall")
 		blocked["up"] = true
 	}
 	// A primitive and weak sense organ
-	sense := func(point api.Point, avoid, grab bool) (string, bool) {
-		var adjacency string
-		if point == head {
-			return "", false
-		}
+	sense := func(point api.Point) string {
 		if point.X == head.X {
 			if point.Y == head.Y+1 {
-				adjacency = "up"
+				return "up"
 			}
 			if point.Y == head.Y-1 {
-				adjacency = "down"
+				return "down"
 			}
 		}
 		if point.Y == head.Y {
 			if point.X == head.X+1 {
-				adjacency = "right"
+				return "right"
 			}
 			if point.X == head.X-1 {
-				adjacency = "left"
+				return "left"
 			}
 		}
-		if avoid {
-			blocked[adjacency] = true
-			return "", false
-		}
-		if grab {
-			return adjacency, true
-		}
-		return "", false
+		return ""
 	}
 	// Go for food
 	for _, point := range s.currentState.Board.Food {
-		if direction, hit := sense(point, false, true); hit {
-			return []string{direction}
+		if dir := sense(point); dir != "" {
+			log.Printf("grab food at %#v", point)
+			return []string{dir}
 		}
 	}
-	// Go for the head
-	var heads []api.Point
+	// Deal with snakes
 	for _, snake := range s.currentState.Board.Snakes {
-		// Avoid larger snakes.
-		if snake.Length > s.currentState.Me.Length {
-			continue
+		// Eat smaller snakes
+		if snake.Length < s.currentState.Me.Length {
+			if dir := sense(snake.Head); dir != "" {
+				log.Printf("strike head at %#v", snake.Head)
+				return []string{dir}
+			}
 		}
-		// Call it friend-o.
-		if snake.Length == s.currentState.Me.Length && rand.Int()%2 == 0 {
-			continue
-		}
-		heads = append(heads, snake.Head)
+		// Avoid collision
 		for _, point := range snake.Body {
-			sense(point, true, false)
-		}
-	}
-	// Avoid self collision
-	for _, point := range s.currentState.Me.Body {
-		sense(point, true, false)
-	}
-	// Avoid peer collision
-	for _, point := range heads {
-		if direction, hit := sense(point, false, true); hit {
-			return []string{direction}
+			if dir := sense(point); dir != "" {
+				log.Printf("avoid other snake %q", dir)
+				blocked[dir] = true
+			}
 		}
 	}
 	// Anything we're not avoiding is an affordance
 	var affordances []string
 	for _, dir := range []string{"up", "down", "left", "right"} {
-		if _, ok := blocked[dir]; !ok {
+		if ok := blocked[dir]; !ok {
 			affordances = append(affordances, dir)
 		}
 	}
@@ -151,7 +142,7 @@ func (s *snek) affordances() []string {
 
 func (s *snek) End(st *api.State) error {
 	if s.currentState == nil {
-		return fmt.Errorf("game not started")
+		return nil
 	}
 	s.previousStates = append(s.previousStates, s.currentState, st)
 	s.currentState = nil
