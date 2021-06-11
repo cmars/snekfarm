@@ -34,7 +34,7 @@ func (s *snek) reseed() {
 	var seed int64
 	_, err := crand.Reader.Read(b[:])
 	if err != nil {
-		seed = time.Now().UnixNano()
+		seed = time.Now().UTC().UnixNano()
 	} else {
 		seed, _ = binary.Varint(b[:])
 	}
