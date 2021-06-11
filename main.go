@@ -8,7 +8,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/cmars/snekfarm/api"
-	"github.com/cmars/snekfarm/random"
+	"github.com/cmars/snekfarm/lucky"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Mount("/random", api.Router(random.New))
+	r.Mount("/lucky", api.Router(lucky.New))
 
 	log.Fatal(http.ListenAndServe(":3000", r))
 }
