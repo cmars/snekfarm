@@ -1,9 +1,11 @@
 package lucky
 
 import (
-	"crypto/rand"
+	crand "crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"log"
+	"math/rand"
+	"time"
 
 	"github.com/cmars/snekfarm/api"
 )
@@ -18,12 +20,25 @@ type snek struct {
 }
 
 func (s *snek) Start(st *api.State) error {
+	s.reseed()
 	if s.currentState != nil || len(s.previousStates) > 0 {
 		return fmt.Errorf("cannot start a game in progress")
 	}
 	s.currentState = st
 	s.previousStates = nil
 	return nil
+}
+
+func (s *snek) reseed() {
+	var b [8]byte
+	var seed int64
+	_, err := crand.Reader.Read(b[:])
+	if err != nil {
+		seed = time.Now().UnixNano()
+	} else {
+		seed, _ = binary.Varint(b[:])
+	}
+	rand.Seed(seed)
 }
 
 func (s *snek) Move(st *api.State) (string, string, error) {
@@ -41,11 +56,7 @@ func (s *snek) direction() string {
 	// Where can I go?
 	directions := s.affordances()
 	// Decide on a direction
-	var b [1]byte
-	if _, err := rand.Reader.Read(b[:]); err != nil {
-		log.Fatalf("failed to read random bytes: %v", err)
-	}
-	i := int(b[0]) % len(directions)
+	i := rand.Intn(len(directions))
 	return directions[i]
 }
 
@@ -105,6 +116,14 @@ func (s *snek) affordances() []string {
 	// Go for the head
 	var heads []api.Point
 	for _, snake := range s.currentState.Board.Snakes {
+		// Avoid larger snakes.
+		if snake.Length > s.currentState.Me.Length {
+			continue
+		}
+		// Call it friend-o.
+		if snake.Length == s.currentState.Me.Length && rand.Int()%2 == 0 {
+			continue
+		}
 		heads = append(heads, snake.Head)
 		for _, point := range snake.Body {
 			sense(point, true, false)
