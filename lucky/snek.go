@@ -1,3 +1,37 @@
+// Package lucky contains a Battlesnake with no sense of time or prediction.
+// This snake reacts only to the current board state on each move, sensing the board
+// by plotting a graph of inhabitable spaces from current degrees of freedom, to a max
+// depth. This max depth simulates the limits of lucky's sense organs; in practice,
+// it is bounded by the CPU required by this naive brute-force approach.
+//
+// Degrees of freedom are spaces not occupied by walls or snakes (including self),
+// or free spaces with less degrees of freedom than current snake length.
+//
+// lucky's decision-making is a result of several drives, in descending order
+// of precedence:
+// - Survival (avoid walls, snakes, and obvious tight spaces)
+// - Strike prey if immediately adjacent
+// - Seek food
+// - Seek freedom, if there is a strongly discernable difference. Otherwise,
+//   choose a random direction.
+//
+// lucky is named for the initial implementation, which used a purely random
+// selection of non-ending moves.  This quickly proved ineffective, but the
+// randomness lives on in the random walk used when sensing the board, and when
+// a direction is otherwise unclear. Earlier versions used randomness as a
+// placeholder for any sort of decision making.
+//
+// Limitations:
+// - The lack of temporal awareness means lucky avoids tight spaces where the
+//   tail will clear up before a crash. This inhibits coiling behavior, which
+//   would be advantageous at longer lengths.
+// - The brute force approach to sensing is not very efficient, and needs
+//   optimization.
+// - Failure at snake avoidance. Even if the "strike immediately" behavior is
+//   inhibited, lucky will still eat smaller snakes "accidentally" without
+//   temporality and prediction.
+// - Hazards are sensed, but not acted on yet.
+//
 package lucky
 
 import (
@@ -13,19 +47,14 @@ import (
 	"github.com/cmars/snekfarm/api"
 )
 
+// New returns a new lucky api.Snek.
 func New() api.Snek {
 	return &snek{}
 }
 
-func NewDocile() api.Snek {
-	return &snek{docile: true}
-}
-
 type snek struct {
-	currentState   *api.State
-	previousStates []*api.State
-	board          board
-	docile         bool
+	currentState *api.State
+	board        board
 }
 
 type board struct {
@@ -58,12 +87,13 @@ func (b board) get(p api.Point) string {
 }
 
 func (s *snek) Start(st *api.State) error {
+	// Reseed the PRNG just to shake off any residual determinism. Probably
+	// useless but also harmless.
 	s.reseed()
-	if s.currentState != nil || len(s.previousStates) > 0 {
+	if s.currentState != nil {
 		return fmt.Errorf("cannot start a game in progress")
 	}
 	s.currentState = st
-	s.previousStates = nil
 	return nil
 }
 
@@ -83,7 +113,6 @@ func (s *snek) Move(st *api.State) (string, string, error) {
 	if s.currentState == nil {
 		return "", "", fmt.Errorf("game not started")
 	}
-	s.previousStates = append(s.previousStates, s.currentState)
 	s.currentState = st
 	direction := s.direction()
 	return direction, "", nil
@@ -92,7 +121,7 @@ func (s *snek) Move(st *api.State) (string, string, error) {
 func (s *snek) direction() string {
 	b := s.observe()
 	origin := orient(b, s.currentState.Me.Head)
-	return decide(origin, s.currentState.Me.Length, s.docile)
+	return decide(origin, s.currentState.Me.Length)
 }
 
 func (s *snek) observe() *board {
@@ -127,12 +156,11 @@ func orient(b *board, head api.Point) *node {
 		if len(cur.parents) == maxOrientDepth {
 			continue
 		}
-		visited[cur.Point]++
 		parents := append([]*node{cur}, cur.parents...)
 		// Check adjacent positions.
 		var adjacent []*node
 		up, down, left, right := cur.above(), cur.below(), cur.leftOf(), cur.rightOf()
-		if visited[up] < 3 {
+		if visited[up] < 2 { // Allow sensing in adjacent directions to overlap
 			if n := newNode(up, b.get(up), parents...); n != nil {
 				cur.up = n
 				if len(parents) < maxOrientDepth {
@@ -140,7 +168,7 @@ func orient(b *board, head api.Point) *node {
 				}
 			}
 		}
-		if visited[down] < 3 {
+		if visited[down] < 2 {
 			if n := newNode(down, b.get(down), parents...); n != nil {
 				cur.down = n
 				if len(parents) < maxOrientDepth {
@@ -148,7 +176,7 @@ func orient(b *board, head api.Point) *node {
 				}
 			}
 		}
-		if visited[left] < 3 {
+		if visited[left] < 2 {
 			if n := newNode(left, b.get(left), parents...); n != nil {
 				cur.left = n
 				if len(parents) < maxOrientDepth {
@@ -156,7 +184,7 @@ func orient(b *board, head api.Point) *node {
 				}
 			}
 		}
-		if visited[right] < 3 {
+		if visited[right] < 2 {
 			if n := newNode(right, b.get(right), parents...); n != nil {
 				cur.right = n
 				if len(parents) < maxOrientDepth {
@@ -164,8 +192,10 @@ func orient(b *board, head api.Point) *node {
 				}
 			}
 		}
-		// Randomize the walk so we get a relatively uniform spread out from
-		// the origin for sensing/heuristics.
+		visited[cur.Point]++
+		// Randomize the walk so we get a more uniform spread out from the
+		// origin. Otherwise the graphs will favor one direction over the
+		// others.
 		rand.Shuffle(len(adjacent), func(i, j int) {
 			adjacent[i], adjacent[j] = adjacent[j], adjacent[i]
 		})
@@ -174,36 +204,28 @@ func orient(b *board, head api.Point) *node {
 	return origin
 }
 
-func decide(origin *node, length int, docile bool) string {
+func decide(origin *node, length int) string {
 	var ms []*move
-	// Add possible moves that we can fit into
-	// TODO: this doesn't account for growth in a tight space
+	// Add possible moves that we can fit into. This doesn't account for
+	// growth in a tight space, or a retreating tail.
 	if origin.up != nil {
 		if m := newMove(origin.up, "up"); m != nil && m.freedom > length {
-			if !docile || docile != m.canStrike {
-				ms = append(ms, m)
-			}
+			ms = append(ms, m)
 		}
 	}
 	if origin.down != nil {
 		if m := newMove(origin.down, "down"); m != nil && m.freedom > length {
-			if !docile || !m.canStrike {
-				ms = append(ms, m)
-			}
+			ms = append(ms, m)
 		}
 	}
 	if origin.left != nil {
 		if m := newMove(origin.left, "left"); m != nil && m.freedom > length {
-			if !docile || !m.canStrike {
-				ms = append(ms, m)
-			}
+			ms = append(ms, m)
 		}
 	}
 	if origin.right != nil {
 		if m := newMove(origin.right, "right"); m != nil && m.freedom > length {
-			if !docile || !m.canStrike {
-				ms = append(ms, m)
-			}
+			ms = append(ms, m)
 		}
 	}
 	if len(ms) == 0 {
@@ -255,7 +277,7 @@ type jitterMoves []*move
 
 func (m jitterMoves) Len() int { return len(m) }
 func (m jitterMoves) Less(i, j int) bool {
-	// Wander, but not into trouble
+	// Wander, but not into trouble if we can help it
 	if m[i].yuck > m[j].yuck {
 		return true
 	}
@@ -355,7 +377,6 @@ func (s *snek) End(st *api.State) error {
 	if s.currentState == nil {
 		return nil
 	}
-	s.previousStates = append(s.previousStates, s.currentState, st)
 	s.currentState = nil
 	return nil
 }

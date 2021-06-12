@@ -1,11 +1,16 @@
 package api
 
+// Snek defines the interactions of a Battlesnake with the API.
 type Snek interface {
 	Start(*State) error
 	Move(*State) (string, string, error)
 	End(*State) error
 }
 
+// State defines the game state on a given turn.
+//
+// Everything else in this file is wireformat types explained at
+// https://docs.battlesnake.com/references/api.
 type State struct {
 	Game  Game
 	Turn  int

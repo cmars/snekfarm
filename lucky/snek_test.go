@@ -109,7 +109,7 @@ func TestOrientDecide(t *testing.T) {
 f......
 .......`[1:])
 	n := orient(b, api.Point{2, 5})
-	dir := decide(n, 6, true)
+	dir := decide(n, 6)
 	c.Assert(dir, qt.Equals, "left")
 }
 
@@ -124,6 +124,6 @@ s......
 s......
 s......`[1:])
 	n := orient(b, api.Point{0, 0})
-	dir := decide(n, 3, false)
+	dir := decide(n, 3)
 	c.Assert(dir, qt.Equals, "right")
 }

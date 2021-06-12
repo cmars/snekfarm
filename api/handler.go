@@ -1,3 +1,5 @@
+// Package api implements the Battlesnake API for hosting a Battlesnake.
+// To host a Battlesnake, implement the Snek interface and serve it up with Router.
 package api
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// Router returns an http.Handler that serves up a Snek.
 func Router(newSnek func() Snek) http.Handler {
 	r := chi.NewRouter()
 	h := &handler{newSnek: newSnek, gameSneks: map[string]Snek{}}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eux
-TARGET=ubuntu@snekfarm.cmars.tech
+TARGET=${TARGET:-ubuntu@snekfarm.cmars.tech}
 
 docker build -t snekfarm .
 docker save snekfarm:latest | ssh $TARGET "docker load"
