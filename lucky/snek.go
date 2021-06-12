@@ -9,11 +9,12 @@
 //
 // lucky's decision-making is a result of several drives, in descending order
 // of precedence:
-// - Survival (avoid walls, snakes, and obvious tight spaces)
-// - Strike prey if immediately adjacent
-// - Seek food
-// - Seek freedom, if there is a strongly discernable difference. Otherwise,
-//   choose a random direction.
+//
+//  * Survival (avoid walls, snakes, and obvious tight spaces)
+//  * Strike prey if immediately adjacent
+//  * Seek food
+//  * Seek freedom, if there is a strongly discernable difference. Otherwise,
+//    choose a random direction.
 //
 // lucky is named for the initial implementation, which used a purely random
 // selection of non-ending moves.  This quickly proved ineffective, but the
@@ -22,15 +23,16 @@
 // placeholder for any sort of decision making.
 //
 // Limitations:
-// - The lack of temporal awareness means lucky avoids tight spaces where the
-//   tail will clear up before a crash. This inhibits coiling behavior, which
-//   would be advantageous at longer lengths.
-// - The brute force approach to sensing is not very efficient, and needs
-//   optimization.
-// - Failure at snake avoidance. Even if the "strike immediately" behavior is
-//   inhibited, lucky will still eat smaller snakes "accidentally" without
-//   temporality and prediction.
-// - Hazards are sensed, but not acted on yet.
+//
+//  * The lack of temporal awareness means lucky avoids tight spaces where the
+//    tail will clear up before a crash. This inhibits coiling behavior, which
+//    would be advantageous at longer lengths.
+//  * The brute force approach to sensing is not very efficient, and needs
+//    optimization.
+//  * Failure at snake avoidance. Even if the "strike immediately" behavior is
+//    inhibited, lucky will still eat smaller snakes "accidentally" without
+//    temporality and prediction.
+//  * Hazards are sensed, but not acted on yet.
 //
 package lucky
 
