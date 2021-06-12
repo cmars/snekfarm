@@ -19,6 +19,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	r.Mount("/lucky", api.Router(lucky.New))
+	r.Mount("/luckydocile", api.Router(lucky.NewDocile))
 
 	log.Fatal(http.ListenAndServe(":3000", r))
 }

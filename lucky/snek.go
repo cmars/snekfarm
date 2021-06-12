@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"sort"
 	"time"
@@ -16,10 +17,15 @@ func New() api.Snek {
 	return &snek{}
 }
 
+func NewDocile() api.Snek {
+	return &snek{docile: true}
+}
+
 type snek struct {
 	currentState   *api.State
 	previousStates []*api.State
 	board          board
+	docile         bool
 }
 
 type board struct {
@@ -79,16 +85,14 @@ func (s *snek) Move(st *api.State) (string, string, error) {
 	}
 	s.previousStates = append(s.previousStates, s.currentState)
 	s.currentState = st
-
-	log.Printf("%#v", s.currentState)
 	direction := s.direction()
 	return direction, "", nil
 }
 
 func (s *snek) direction() string {
 	b := s.observe()
-	origin := s.orient(b)
-	return s.decide(origin)
+	origin := orient(b, s.currentState.Me.Head)
+	return decide(origin, s.currentState.Me.Length, s.docile)
 }
 
 func (s *snek) observe() *board {
@@ -111,87 +115,153 @@ func (s *snek) observe() *board {
 	return b
 }
 
-func (s *snek) orient(b *board) *node {
-	origin := &node{Point: s.currentState.Me.Head}
+const maxOrientDepth = 12
+
+func orient(b *board, head api.Point) *node {
+	origin := &node{Point: head}
 	var cur *node
 	next := []*node{origin}
+	visited := map[api.Point]int{}
 	for len(next) > 0 {
 		cur, next = next[0], next[1:]
+		if len(cur.parents) == maxOrientDepth {
+			continue
+		}
+		visited[cur.Point]++
 		parents := append([]*node{cur}, cur.parents...)
+		// Check adjacent positions.
+		var adjacent []*node
 		up, down, left, right := cur.above(), cur.below(), cur.leftOf(), cur.rightOf()
-		if n := newNode(up, b.get(up), parents...); n != nil {
-			cur.up = n
-			next = append(next, n)
+		if visited[up] < 3 {
+			if n := newNode(up, b.get(up), parents...); n != nil {
+				cur.up = n
+				if len(parents) < maxOrientDepth {
+					adjacent = append(adjacent, n)
+				}
+			}
 		}
-		if n := newNode(down, b.get(down), parents...); n != nil {
-			cur.down = n
-			next = append(next, n)
+		if visited[down] < 3 {
+			if n := newNode(down, b.get(down), parents...); n != nil {
+				cur.down = n
+				if len(parents) < maxOrientDepth {
+					adjacent = append(adjacent, n)
+				}
+			}
 		}
-		if n := newNode(up, b.get(left), parents...); n != nil {
-			cur.left = n
-			next = append(next, n)
+		if visited[left] < 3 {
+			if n := newNode(left, b.get(left), parents...); n != nil {
+				cur.left = n
+				if len(parents) < maxOrientDepth {
+					adjacent = append(adjacent, n)
+				}
+			}
 		}
-		if n := newNode(up, b.get(right), parents...); n != nil {
-			cur.right = n
-			next = append(next, n)
+		if visited[right] < 3 {
+			if n := newNode(right, b.get(right), parents...); n != nil {
+				cur.right = n
+				if len(parents) < maxOrientDepth {
+					adjacent = append(adjacent, n)
+				}
+			}
 		}
+		// Randomize the walk so we get a relatively uniform spread out from
+		// the origin for sensing/heuristics.
+		rand.Shuffle(len(adjacent), func(i, j int) {
+			adjacent[i], adjacent[j] = adjacent[j], adjacent[i]
+		})
+		next = append(next, adjacent...)
 	}
 	return origin
 }
 
-func (s *snek) decide(origin *node) string {
-	var ms moves
-	if m := s.newMove(origin.up, "up"); m != nil {
-		ms = append(ms, m)
+func decide(origin *node, length int, docile bool) string {
+	var ms []*move
+	// Add possible moves that we can fit into
+	// TODO: this doesn't account for growth in a tight space
+	if origin.up != nil {
+		if m := newMove(origin.up, "up"); m != nil && m.freedom > length {
+			if !docile || docile != m.canStrike {
+				ms = append(ms, m)
+			}
+		}
 	}
-	if m := s.newMove(origin.down, "down"); m != nil {
-		ms = append(ms, m)
+	if origin.down != nil {
+		if m := newMove(origin.down, "down"); m != nil && m.freedom > length {
+			if !docile || !m.canStrike {
+				ms = append(ms, m)
+			}
+		}
 	}
-	if m := s.newMove(origin.left, "left"); m != nil {
-		ms = append(ms, m)
+	if origin.left != nil {
+		if m := newMove(origin.left, "left"); m != nil && m.freedom > length {
+			if !docile || !m.canStrike {
+				ms = append(ms, m)
+			}
+		}
 	}
-	if m := s.newMove(origin.right, "right"); m != nil {
-		ms = append(ms, m)
+	if origin.right != nil {
+		if m := newMove(origin.right, "right"); m != nil && m.freedom > length {
+			if !docile || !m.canStrike {
+				ms = append(ms, m)
+			}
+		}
 	}
-	sort.Sort(ms)
-	if len(ms) > 0 {
-		return ms[0].direction
+	if len(ms) == 0 {
+		log.Println("out of moves!")
+		return ""
 	}
-	log.Println("out of moves")
-	return ""
+	var maxYum, maxYumAt int
+	maxFree, maxFreeAt, minFree := 0, 0, math.MaxInt32
+	for i := range ms {
+		if ms[i].canStrike {
+			return ms[i].direction
+		}
+		if ms[i].yum > maxYum {
+			maxYum, maxYumAt = ms[i].yum, i
+		}
+		if ms[i].freedom > maxFree {
+			maxFree, maxFreeAt = ms[i].freedom, i
+		}
+		if ms[i].freedom < minFree {
+			minFree = ms[i].freedom
+		}
+	}
+	if maxYum < yumScentRange {
+		// Without a strong food signal, aim for a clearly more open space.
+		if maxFree-minFree > length/2 {
+			return ms[maxFreeAt].direction
+		}
+		// Otherwise, mix it up, so we don't get stuck in circles.
+		sort.Sort(jitterMoves(ms))
+		return ms[len(ms)-1].direction
+	}
+	// Prefer the yummiest direction
+	return ms[maxYumAt].direction
 }
 
 type move struct {
 	*node
 	direction string
-	heuristic float64
 }
 
-func (s *snek) newMove(n *node, dir string) *move {
+func newMove(n *node, dir string) *move {
 	return &move{
 		node:      n,
 		direction: dir,
-		heuristic: s.heuristic(n),
 	}
 }
 
-func (s *snek) heuristic(n *node) float64 {
-	// Food is best, then freedom, then the least yuck involved.
-	value := float64(n.yum)*3.0 + float64(n.freedom)*2.0 - float64(n.yuck)*0.5
-	// Opportunistic predation!
-	if n.canStrike {
-		value = value + 50.0
+type jitterMoves []*move
+
+func (m jitterMoves) Len() int { return len(m) }
+func (m jitterMoves) Less(i, j int) bool {
+	// Wander, but not into trouble
+	if m[i].yuck > m[j].yuck {
+		return true
 	}
-	return value
+	return rand.Int()%2 == 0
 }
-
-type moves []*move
-
-func (m moves) Len() int { return len(m) }
-func (m moves) Less(i, j int) bool {
-	return m[i].heuristic < m[j].heuristic
-}
-func (m moves) Swap(i, j int) {
+func (m jitterMoves) Swap(i, j int) {
 	m[i], m[j] = m[j], m[i]
 }
 
@@ -231,23 +301,29 @@ func newNode(p api.Point, val string, parents ...*node) *node {
 	if val == "food" {
 		n.freedom++
 		// TODO: add a hunger factor
-		n.yum = n.yum + yumScentRange
-		for i := range parents {
-			if i < yumScentRange {
-				// Sense of scent decays over distance
-				parents[i].yum = parents[i].yum + (yumScentRange - i)
+		if len(parents) < yumScentRange {
+			attraction := yumScentRange - len(parents)
+			n.yum = n.yum + attraction
+			for i := range parents {
+				if i < attraction {
+					parents[i].yum = parents[i].yum + attraction - i
+				}
+				n.freedom++
 			}
-			n.freedom++
 		}
 	}
 	if val == "hazard" {
 		// TODO: improve yuck avoidance?
-		n.yuck = n.yuck + yuckScentRange
-		for i := range parents {
-			if i > yuckScentRange {
-				break
+		n.freedom++ // yucky but still free
+		if len(parents) < yuckScentRange {
+			repulsion := yuckScentRange - len(parents)
+			n.yuck = n.yuck + repulsion
+			for i := range parents {
+				if i >= repulsion {
+					break
+				}
+				parents[i].yuck = parents[i].yuck + repulsion - i
 			}
-			parents[i].yuck = parents[i].yuck + (yuckScentRange - i)
 		}
 	}
 	if val == "" {
@@ -273,80 +349,6 @@ func (n *node) leftOf() api.Point {
 }
 func (n *node) rightOf() api.Point {
 	return api.Point{X: n.Point.X + 1, Y: n.Point.Y}
-}
-
-func (s *snek) affordances() []string {
-	head := s.currentState.Me.Head
-	blocked := map[string]bool{}
-	// Check if walls are blocking some moves
-	if head.X == 0 {
-		log.Printf("avoid left wall")
-		blocked["left"] = true
-	}
-	if head.X == s.currentState.Board.Width-1 {
-		log.Printf("avoid right wall")
-		blocked["right"] = true
-	}
-	if head.Y == 0 {
-		log.Printf("avoid bottom wall")
-		blocked["down"] = true
-	}
-	if head.Y == s.currentState.Board.Height-1 {
-		log.Printf("avoid top wall")
-		blocked["up"] = true
-	}
-	// A primitive and weak sense organ
-	sense := func(point api.Point) string {
-		if point.X == head.X {
-			if point.Y == head.Y+1 {
-				return "up"
-			}
-			if point.Y == head.Y-1 {
-				return "down"
-			}
-		}
-		if point.Y == head.Y {
-			if point.X == head.X+1 {
-				return "right"
-			}
-			if point.X == head.X-1 {
-				return "left"
-			}
-		}
-		return ""
-	}
-	// Go for food
-	for _, point := range s.currentState.Board.Food {
-		if dir := sense(point); dir != "" {
-			log.Printf("grab food at %#v", point)
-			return []string{dir}
-		}
-	}
-	// Deal with snakes
-	for _, snake := range s.currentState.Board.Snakes {
-		// Eat smaller snakes
-		if snake.Length < s.currentState.Me.Length {
-			if dir := sense(snake.Head); dir != "" {
-				log.Printf("strike head at %#v", snake.Head)
-				return []string{dir}
-			}
-		}
-		// Avoid collision
-		for _, point := range snake.Body {
-			if dir := sense(point); dir != "" {
-				log.Printf("avoid other snake %q", dir)
-				blocked[dir] = true
-			}
-		}
-	}
-	// Anything we're not avoiding is an affordance
-	var affordances []string
-	for _, dir := range []string{"up", "down", "left", "right"} {
-		if ok := blocked[dir]; !ok {
-			affordances = append(affordances, dir)
-		}
-	}
-	return affordances
 }
 
 func (s *snek) End(st *api.State) error {
